@@ -6,8 +6,8 @@ use std::{env, process, time::Duration};
 use indicatif::{ProgressBar, ProgressStyle};
 use dotenvy::dotenv;
 
-use llm::review_changes;
-use git::get_staged_files;
+use crate::llm::{review_changes, Severity};
+use crate::git::get_staged_files;
 
 #[tokio::main]
 async fn main() {
@@ -48,24 +48,41 @@ async fn main() {
 
     match result {
         Ok(analysis) => {
-            println!("\n--- CODE REVIEW ---\n");
+            println!("VERDICT: {}", analysis.verdict);
+            println!("SCORE:   {}/10", analysis.score);
+            println!("----------------------------------------");
 
-            // general info
-            println!("Verdict: {}", analysis.verdict);
-            println!("Score: {}/10", analysis.score);
+            let mut critical_errors = 0;
 
-            // issues
             if !analysis.issues.is_empty() {
-                println!("\nIssues Found:");
                 for issue in analysis.issues {
-                    println!("[{:?}] {}: {}", issue.severity, issue.file, issue.description);
+                    let level = match issue.severity {
+                        Severity::Critical => {
+                            critical_errors += 1;
+                            "[CRITICAL]"
+                        },
+                        Severity::Warning => "[WARNING]",
+                        Severity::Nitpick => "[NITPICK]",
+                    };
+                    
+                    println!("{} {}: {}", level, issue.file, issue.description);
+                    if let Some(line) = issue.line {
+                         println!("           Line: {}", line);
+                    }
                 }
             } else {
-                println!("Surprisingly decent.");
+                println!("No issues found.");
             }
+            println!("----------------------------------------");
 
-            println!("\n-------------------");
+            if critical_errors > 0 {
+                eprintln!("FAILURE: {} critical issues blocked commit.", critical_errors);
+                process::exit(1);
+            }
         }
-        Err(e) => eprintln!("Fatal Error: {:?}", e),
+        Err(e) => {
+            eprintln!("FATAL: Analysis failed: {:?}", e);
+            process::exit(1);
+        }
     }
 }
