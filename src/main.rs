@@ -1,11 +1,14 @@
 mod llm;
 mod git;
+mod config;
 
 use std::{env, process, time::Duration};
 
+use glob::Pattern;
 use indicatif::{ProgressBar, ProgressStyle};
 use dotenvy::dotenv;
 
+use crate::config::Config;
 use crate::llm::{review_changes, Severity};
 use crate::git::get_staged_files;
 
@@ -14,6 +17,25 @@ async fn main() {
     dotenv().ok();
 
     let api_key = env::var("OPENAI_API_KEY").expect("'OPENAI_API_KEY' is missing");
+    let config = Config::load().unwrap_or_else(|e| {
+        eprintln!("Failed to load config, using defaults: {}", e);
+        Config { 
+            model: "gpt-4o-mini".to_string(), 
+            toxicity: "High".to_string(),
+            ignore: vec![],
+        }
+    });
+    let ignore_patterns: Vec<Pattern> = config.ignore.iter()
+        .filter_map(|p| {
+            match Pattern::new(p) {
+                Ok(pat) => Some(pat),
+                Err(e) => {
+                    eprintln!("Invalid ignore pattern '{}': {}", p, e);
+                    None
+                }
+            }
+        })
+        .collect();
 
     println!("=== Git Sensei (MVP 0.1) ===");
 
@@ -25,12 +47,24 @@ async fn main() {
         }
     };
 
-    if staged_files.is_empty() {
-        println!("Staging area is empty. Go write some code.");
+    let files_to_review: Vec<_> = staged_files.into_iter()
+        .filter(|f| {
+            for pattern in &ignore_patterns {
+                if pattern.matches(&f.path) {
+                    println!("Ignoring {} (matched {})", f.path, pattern);
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    if files_to_review.is_empty() {
+        println!("Nothing to review.");
         process::exit(0);
     }
 
-    println!("Found {} changed file(s). Preparing context...", staged_files.len());
+    println!("Found {} changed file(s). Preparing context...", files_to_review.len());
 
     // Init custom spinner
     let pb = ProgressBar::new_spinner();
@@ -41,7 +75,7 @@ async fn main() {
     pb.enable_steady_tick(Duration::from_millis(100));
 
     // Wait for senior code review
-    let result = review_changes(staged_files, &api_key).await;
+    let result = review_changes(files_to_review, &api_key, &config).await;
 
     // Disable spinner
     pb.finish_and_clear();

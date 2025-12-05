@@ -1,0 +1,3 @@
+model = "gpt-4o"
+toxicity = "Medium"
+ignore = ["Cargo.lock", "target/**", "assets/**/*.json"]

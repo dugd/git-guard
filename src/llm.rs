@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use anyhow::{Context, Result, anyhow};
 use serde_json::json;
 
+use crate::config::Config;
+
 // API contracts
 
 #[derive(Deserialize)]
@@ -56,11 +58,17 @@ pub struct FileContext {
 
 // Logic
 
-pub async fn review_changes(files: Vec<FileContext>, api_key: &str) -> Result<ReviewAnalysis> {
+pub async fn review_changes(files: Vec<FileContext>, api_key: &str, config: &Config) -> Result<ReviewAnalysis> {
     let client = Client::new();
 
-    let system_prompt = r#"
-    You are 'Git Sensei', a cynical Principal Software Engineer.
+    let persona_adjective = match config.toxicity.as_str() {
+        "Low" => "strict but polite",
+        "Medium" => "cynical", // By default
+        _ => "extremely toxic and ruthless",
+    };
+
+    let system_prompt = format!(r#"
+    You are 'Git Sensei', a {persona_adjective} Principal Software Engineer.
     Your goal is to review code commits before they are pushed.
     
     PERSONA RULES:
@@ -79,26 +87,26 @@ pub async fn review_changes(files: Vec<FileContext>, api_key: &str) -> Result<Re
     - Use line numbers from the provided context.
     
     You MUST respond with valid JSON:
-    {
+    {{
         "verdict": "string (short, witty summary)",
         "score": number (0-10),
         "issues": [
-            {
+            {{
                 "file": "string",
                 "line": number,
                 "severity": "critical" | "warning" | "nitpick",
                 "description": "string (short & punchy)"
-            }
+            }}
         ]
-    }
-    "#;
+    }}
+    "#);
 
     let user_content = json!({
         "files_to_review": files,
     }).to_string();
 
     let body = json!({
-        "model": "gpt-4o-mini",
+        "model": config.model,
         "response_format": { "type": "json_object"},
         "messages": [
             {"role": "system", "content": system_prompt},
