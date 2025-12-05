@@ -1,8 +1,10 @@
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 use serde_json::json;
 use dotenvy::dotenv;
+use termimad::{MadSkin, crossterm::style::Color};
 
-use std::{env, process::Command};
+use std::{env, process::Command, time::Duration};
 
 #[derive(Deserialize)]
 struct OpenAiResponse {
@@ -46,18 +48,17 @@ fn get_staged_diff() -> Result<String, String> {
 async fn ask_gpt(diff: &str, api_key: &str) -> Result<String, String> {
     let client = reqwest::Client::new();
 
-    let system_prompt = "You are a Toxic Senior Software Engineer. \
-        You are reviewing a Junior's code via git diff. \
-        Your goal is to find bugs, bad practices, and security issues. \
-        Be cynical, sarcastic, and brief. Use technical slang. \
-        If the code is good, admit it reluctantly. \
-        Output in Markdown format.";
+    let system_prompt = "You are a cynical Senior Software Engineer. \
+        Review the following git diff. Focus ONLY on logic errors, security risks, and bad patterns. \
+        Do NOT use filler phrases like 'Let's dive in' or 'In conclusion'. \
+        Do NOT be polite. Be harsh, direct, and technical. \
+        Use Markdown. Format code blocks with language hints.";
     
     let body = json!({
         "model": "gpt-4o-mini",
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": format!("Review this staged git diff:\n\n{}", diff)}
+            {"role": "user", "content": diff}
         ]
     });
 
@@ -81,6 +82,14 @@ async fn ask_gpt(diff: &str, api_key: &str) -> Result<String, String> {
         .ok_or_else(|| "No content in response".to_string())
 }
 
+fn print_markdown(text: &str) {
+    let mut skin = MadSkin::default();
+    skin.bold.set_fg(Color::Red);
+    skin.italic.set_fg(Color::Yellow);
+    skin.set_headers_fg(Color::Magenta);
+    skin.print_text(text);
+}
+
 
 #[tokio::main]
 async fn main() {
@@ -99,12 +108,25 @@ async fn main() {
         }
     };
 
-    println!("Diff found ({} chars). Asking the Senior...", diff.len());
+    println!("Diff found ({} chars).", diff.len());
 
-    match ask_gpt(&diff, &api_key).await {
+    // Init custom spinner
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(ProgressStyle::default_spinner()
+        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+        .template("{spinner:.green} Judging your code...").unwrap());
+    pb.enable_steady_tick(Duration::from_millis(100));
+
+    // Wait for senior code review
+    let result = ask_gpt(&diff, &api_key).await;
+
+    // Disable spinner
+    pb.finish_and_clear();
+
+    match result {
         Ok(review) => {
             println!("\n--- CODE REVIEW ---\n");
-            println!("{}", review);
+            print_markdown(&review);
             println!("\n-------------------");
         }
         Err(e) => eprintln!("AI Error: {}", e),
