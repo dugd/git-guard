@@ -1,27 +1,14 @@
-use indicatif::{ProgressBar, ProgressStyle};
-use serde::Deserialize;
-use serde_json::json;
-use dotenvy::dotenv;
-use termimad::{MadSkin, crossterm::style::Color};
+mod llm;
 
 use std::{env, process::Command, time::Duration};
 
-#[derive(Deserialize)]
-struct OpenAiResponse {
-    choices: Vec<Choice>
-}
+use indicatif::{ProgressBar, ProgressStyle};
+use dotenvy::dotenv;
+use termimad::{MadSkin, crossterm::style::Color};
 
-#[derive(Deserialize)]
-struct Choice {
-    message: Message,
-}
+use llm::{FileContext, review_changes};
 
-#[derive(Deserialize)]
-struct Message {
-    content: String,
-}
-
-/// Get staged diff using the git command
+// ignore
 fn get_staged_diff() -> Result<String, String> {
     // System call
     let output = Command::new("git")
@@ -44,44 +31,7 @@ fn get_staged_diff() -> Result<String, String> {
     Ok(diff)
 }
 
-/// Ask chat gpt for code review
-async fn ask_gpt(diff: &str, api_key: &str) -> Result<String, String> {
-    let client = reqwest::Client::new();
-
-    let system_prompt = "You are a cynical Senior Software Engineer. \
-        Review the following git diff. Focus ONLY on logic errors, security risks, and bad patterns. \
-        Do NOT use filler phrases like 'Let's dive in' or 'In conclusion'. \
-        Do NOT be polite. Be harsh, direct, and technical. \
-        Use Markdown. Format code blocks with language hints.";
-    
-    let body = json!({
-        "model": "gpt-4o-mini",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": diff}
-        ]
-    });
-
-    let res = client.post("https://api.openai.com/v1/chat/completions")
-        .bearer_auth(api_key)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !res.status().is_success() {
-        return Err(format!("API Error: {}", res.status()));
-    }
-
-    let response_data: OpenAiResponse = res.json()
-        .await
-        .map_err(|e| format!("Failed to parse JSON: {}", e))?;
-
-    response_data.choices.first()
-        .map(|c| c.message.content.clone())
-        .ok_or_else(|| "No content in response".to_string())
-}
-
+// ignore
 fn print_markdown(text: &str) {
     let mut skin = MadSkin::default();
     skin.bold.set_fg(Color::Red);
@@ -98,37 +48,53 @@ async fn main() {
     // Used
     let api_key = env::var("OPENAI_API_KEY").expect("'OPENAI_API_KEY' is missing");
 
-    println!("=== Git Sensei (Demo) ===");
+    println!("=== Git Sensei (MVP 0.1) ===");
 
-    let diff = match get_staged_diff() {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("Git Error: {}", e);
-            return;
-        }
-    };
+    // TODO: implement git.rs module
+    let mock_files = vec![
+        FileContext {
+            path: "src/auth.rs".to_string(),
+            diff: "+ let telegram_bot_api = \"1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789\";".to_string(),
+            full_content: None,
+        },
+    ];
 
-    println!("Diff found ({} chars).", diff.len());
+    println!("Analyzing {} files...", mock_files.len());
 
     // Init custom spinner
     let pb = ProgressBar::new_spinner();
     pb.set_style(ProgressStyle::default_spinner()
         .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
         .template("{spinner:.green} Judging your code...").unwrap());
+
     pb.enable_steady_tick(Duration::from_millis(100));
 
     // Wait for senior code review
-    let result = ask_gpt(&diff, &api_key).await;
+    let result = review_changes(mock_files, &api_key).await;
 
     // Disable spinner
     pb.finish_and_clear();
 
     match result {
-        Ok(review) => {
+        Ok(analysis) => {
             println!("\n--- CODE REVIEW ---\n");
-            print_markdown(&review);
+
+            // general info
+            println!("Verdict: {}", analysis.verdict);
+            println!("Score: {}/10", analysis.score);
+
+            // issues
+            if !analysis.issues.is_empty() {
+                println!("\nIssues Found:");
+                for issue in analysis.issues {
+                    println!("[{:?}] {}: {}", issue.severity, issue.file, issue.description);
+                }
+            } else {
+                println!("Surprisingly decent.");
+            }
+
             println!("\n-------------------");
         }
-        Err(e) => eprintln!("AI Error: {}", e),
+        Err(e) => eprintln!("Fatal Error: {:?}", e),
     }
 }
