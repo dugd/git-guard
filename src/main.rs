@@ -1,65 +1,36 @@
 mod llm;
+mod git;
 
-use std::{env, process::Command, time::Duration};
+use std::{env, process, time::Duration};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use dotenvy::dotenv;
-use termimad::{MadSkin, crossterm::style::Color};
 
-use llm::{FileContext, review_changes};
-
-// ignore
-fn get_staged_diff() -> Result<String, String> {
-    // System call
-    let output = Command::new("git")
-        .arg("diff")
-        .arg("--cached")
-        .output()
-        .map_err(|e| format!("Failed to execute git: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(format!("Git error: {}", stderr));
-    }
-
-    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-
-    if diff.trim().is_empty() {
-        return Err("No staged changes found. Did you forget 'git add'?".to_string())
-    }
-
-    Ok(diff)
-}
-
-// ignore
-fn print_markdown(text: &str) {
-    let mut skin = MadSkin::default();
-    skin.bold.set_fg(Color::Red);
-    skin.italic.set_fg(Color::Yellow);
-    skin.set_headers_fg(Color::Magenta);
-    skin.print_text(text);
-}
-
+use llm::review_changes;
+use git::get_staged_files;
 
 #[tokio::main]
 async fn main() {
     dotenv().ok();
 
-    // Used
     let api_key = env::var("OPENAI_API_KEY").expect("'OPENAI_API_KEY' is missing");
 
     println!("=== Git Sensei (MVP 0.1) ===");
 
-    // TODO: implement git.rs module
-    let mock_files = vec![
-        FileContext {
-            path: "src/auth.rs".to_string(),
-            diff: "+ let telegram_bot_api = \"1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789\";".to_string(),
-            full_content: None,
-        },
-    ];
+    let staged_files = match get_staged_files() {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Git Error: {}", e);
+            process::exit(1);
+        }
+    };
 
-    println!("Analyzing {} files...", mock_files.len());
+    if staged_files.is_empty() {
+        println!("Staging area is empty. Go write some code.");
+        process::exit(0);
+    }
+
+    println!("Found {} changed file(s). Preparing context...", staged_files.len());
 
     // Init custom spinner
     let pb = ProgressBar::new_spinner();
@@ -70,7 +41,7 @@ async fn main() {
     pb.enable_steady_tick(Duration::from_millis(100));
 
     // Wait for senior code review
-    let result = review_changes(mock_files, &api_key).await;
+    let result = review_changes(staged_files, &api_key).await;
 
     // Disable spinner
     pb.finish_and_clear();
