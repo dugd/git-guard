@@ -1,5 +1,6 @@
 mod llm;
 mod git;
+mod utils;
 mod config;
 
 use std::{env, process, time::Duration};
@@ -8,7 +9,7 @@ use glob::Pattern;
 use indicatif::{ProgressBar, ProgressStyle};
 use dotenvy::dotenv;
 
-use crate::config::Config;
+use crate::config::{Config, ContextConfig};
 use crate::llm::{review_changes, Severity};
 use crate::git::get_staged_files;
 
@@ -25,6 +26,8 @@ async fn main() {
             ignore: vec![],
         }
     });
+    let context_config = ContextConfig::default();
+
     let ignore_patterns: Vec<Pattern> = config.ignore.iter()
         .filter_map(|p| {
             match Pattern::new(p) {
@@ -39,7 +42,7 @@ async fn main() {
 
     println!("=== Git Sensei (MVP 0.1) ===");
 
-    let staged_files = match get_staged_files() {
+    let staged_files = match get_staged_files(&context_config) {
         Ok(f) => f,
         Err(e) => {
             eprintln!("Git Error: {}", e);

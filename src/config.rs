@@ -3,6 +3,7 @@ use std::{fs, path::Path};
 use serde::Deserialize;
 use anyhow::Result;
 
+/// Core config
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_model")]
@@ -37,6 +38,27 @@ impl Config {
                 toxicity: default_toxicity(),
                 ignore: vec!["*.lock".to_string(), "target/*".to_string()],
             })
+        }
+    }
+}
+
+/// Context specific config
+#[derive(Debug, Clone, Deserialize)]
+pub struct ContextConfig {
+    // git diff context
+    pub context_lines: u32,
+    // max tokens per each file
+    pub max_file_tokens: usize,
+    // max tokens total
+    pub max_global_tokens: usize,
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            context_lines: 3,
+            max_file_tokens: 2000,
+            max_global_tokens: 8000,
         }
     }
 }
