@@ -1,4 +1,4 @@
-use git_sensei::run;
+use git_guard::run;
 use dotenvy::dotenv;
 use std::process;
 

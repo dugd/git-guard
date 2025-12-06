@@ -405,8 +405,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "git-sensei"
-version = "0.1.0"
+name = "git-guard"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "dotenvy",
